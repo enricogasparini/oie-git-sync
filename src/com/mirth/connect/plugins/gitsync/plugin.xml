@@ -1,0 +1,25 @@
+<pluginMetaData path="gitsync">
+    <name>Git Sync</name>
+    <author>Enrico Gasparini</author>
+    <pluginVersion>@pluginversion</pluginVersion>
+    <mirthVersion>@oieversion</mirthVersion>
+    <url>https://github.com/enricogasparini/oie-git-sync</url>
+    <description>Bidirectional Git synchronisation for channel configurations, code templates, and global scripts. Enables CI/CD workflows with version control, code review, and automated promotion.</description>
+    <serverClasses>
+        <string>com.mirth.connect.plugins.gitsync.GitSyncPlugin</string>
+    </serverClasses>
+    <clientClasses>
+        <string>com.mirth.connect.plugins.gitsync.GitSyncClient</string>
+    </clientClasses>
+    <library type="SERVER" path="gitsync-server.jar" />
+    <library type="SHARED" path="gitsync-shared.jar" />
+    <library type="CLIENT" path="gitsync-client.jar" />
+    <library type="SERVER" path="lib/org.eclipse.jgit.jar" />
+    <library type="SERVER" path="lib/org.eclipse.jgit.ssh.jsch.jar" />
+    <library type="SERVER" path="lib/jsch.jar" />
+    <library type="SERVER" path="lib/slf4j-api.jar" />
+    <apiProvider type="SERVLET_INTERFACE"
+        name="com.mirth.connect.plugins.gitsync.GitSyncServletInterface" />
+    <apiProvider type="SERVER_CLASS"
+        name="com.mirth.connect.plugins.gitsync.GitSyncServlet" />
+</pluginMetaData>

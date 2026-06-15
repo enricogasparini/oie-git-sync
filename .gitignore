@@ -1,0 +1,50 @@
+# Build output
+build/
+dist/
+classes/
+target/
+out/
+
+# Dependencies and tools (fetched by `ant fetch-libs` / `ant fetch-tools` / `ant fetch-test-libs`)
+lib/*.jar
+lib/*.zip
+lib/spotbugs-*/
+lib/checkstyle-*/
+lib/test/
+
+# Compiled class files
+*.class
+
+# IDEs
+*.iml
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+nbproject/private/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+hs_err_pid*
+
+# Static analysis output
+spotbugs-*.xml
+checkstyle-report.xml
+pmd-report.xml
+
+# Local test / dev scratch
+appdata/
+.gitsync-pending/
+
+# Local developer signing setup (see scripts/README.md and docs/local-testing.md)
+scripts/dev-signing.properties
+scripts/dev-keystore.jks
+scripts/dev-keystore.cer
+scripts/*.pem

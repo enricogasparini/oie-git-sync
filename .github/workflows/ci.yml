@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Pin the OIE engine commit we build against. Bump intentionally when we
+# validate the plugin against a newer engine state. A pinned SHA keeps the
+# cache key honest (the key embeds this ref) and stops unrelated upstream
+# engine breakage from failing plugin PRs.
+env:
+  OIE_ENGINE_REPO: openintegrationengine/engine
+  OIE_ENGINE_REF: 8c1111ba346cb6fcbc796926e46a55e9590a67a2
+
+jobs:
+  # Fast lane: style + format checks that don't need the engine classpath.
+  style:
+    name: Style (Checkstyle + google-java-format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Fetch static analysis and format tools
+        run: |
+          ant -noinput fetch-tools
+          ant -noinput fetch-test-libs
+
+      - name: Run Checkstyle
+        run: ant -noinput checkstyle
+
+      - name: Run google-java-format check
+        run: ant -noinput format-check
+
+      - name: Upload Checkstyle report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: checkstyle-report
+          path: build/reports/checkstyle/
+          if-no-files-found: ignore
+
+  # Slow lane: full compile + unit tests + coverage gate + SpotBugs. Needs
+  # the engine built as a compile-time dependency.
+  build:
+    name: Build, test, coverage and SpotBugs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: plugin
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check out OIE engine
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.OIE_ENGINE_REPO }}
+          ref: ${{ env.OIE_ENGINE_REF }}
+          path: engine
+
+      # Cache the built engine JARs — the engine build is slow and rarely
+      # changes between plugin PRs.
+      - name: Cache engine build output
+        id: cache-engine
+        uses: actions/cache@v5
+        with:
+          path: |
+            engine/server/lib
+            engine/server/build
+            engine/server/setup
+            engine/donkey/lib
+            engine/donkey/setup
+            engine/client/lib
+          key: oie-engine-${{ env.OIE_ENGINE_REF }}-${{ hashFiles('engine/server/mirth-build.xml') }}
+
+      - name: Build OIE engine (compile-only)
+        if: steps.cache-engine.outputs.cache-hit != 'true'
+        working-directory: engine/server
+        run: ant -noinput -f mirth-build.xml -DdisableSigning=true -DdisableTests=true
+
+      - name: Fetch plugin runtime libs
+        working-directory: plugin
+        run: ant -noinput fetch-libs
+
+      - name: Fetch static analysis tools
+        working-directory: plugin
+        run: ant -noinput fetch-tools
+
+      - name: Fetch test tools (JUnit, Mockito, JaCoCo, google-java-format)
+        working-directory: plugin
+        run: ant -noinput fetch-test-libs
+
+      - name: Build plugin
+        working-directory: plugin
+        run: ant -noinput build
+
+      - name: Run unit tests
+        working-directory: plugin
+        run: ant -noinput test
+
+      - name: Run coverage + enforce 80/70 gate
+        working-directory: plugin
+        run: ant -noinput coverage-enforce
+
+      - name: Run SpotBugs
+        working-directory: plugin
+        run: ant -noinput spotbugs
+
+      - name: Upload distribution zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: gitsync-dist
+          path: plugin/dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload SpotBugs report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: spotbugs-report
+          path: plugin/build/reports/spotbugs/
+          if-no-files-found: ignore
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-report
+          path: plugin/build/reports/tests/
+          if-no-files-found: ignore
+
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: plugin/build/reports/coverage/
+          if-no-files-found: ignore

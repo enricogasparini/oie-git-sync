@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # GitHub Actions (used by the workflows in .github/workflows/)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Java dependencies are not fully managed via Dependabot because the build
+  # fetches JGit directly via `ant fetch-libs` rather than Maven/Gradle. The
+  # build.xml pins JGit 7.1.0 explicitly — bump manually when a new release
+  # ships on Maven Central.

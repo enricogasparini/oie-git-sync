@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    SpotBugs exclusion filter for oie-git-sync.
+
+    Keep this file small. Every exclusion should either have a comment
+    explaining why the warning does not apply, or point to an issue tracking
+    the eventual fix. When in doubt, fix the code instead of excluding it.
+-->
+<FindBugsFilter>
+
+    <!-- Generated Swing glue: MiG layout constant strings produce spurious
+         "dead local store" warnings on many Swing patterns we use. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.GitSyncSettingsPanel"/>
+        <Bug pattern="DLS_DEAD_LOCAL_STORE"/>
+    </Match>
+
+    <!-- DTOs implement Serializable to satisfy OIE's XStream-based
+         serialisation; SpotBugs cannot see the XStream annotations and flags
+         "serial UID" / "class should be immutable" on every POJO. -->
+    <Match>
+        <Package name="com.mirth.connect.plugins.gitsync.model"/>
+        <Bug pattern="SE_BAD_FIELD,SE_NO_SERIALVERSIONID,EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- GitSyncPlugin.getInstance() is a deliberate plugin-wide singleton;
+         OIE's extension loader instantiates the class exactly once. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.GitSyncPlugin"/>
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD,MS_EXPOSE_REP,EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- GitSyncClient holds a reference to the AbstractSettingsPanel — this is
+         the mandatory lifecycle for OIE SettingsPanelPlugin implementations. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.GitSyncClient"/>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- The settings panel is a Swing JPanel; we never serialise it but
+         JPanel's Serializable inheritance causes SE_BAD_FIELD_STORE on our
+         non-Serializable fields (Frame, plugin reference, DocumentListener).
+         These fields are set during construction and never serialised. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.GitSyncSettingsPanel"/>
+        <Bug pattern="SE_BAD_FIELD,SE_BAD_FIELD_STORE,EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!-- PendingChangeTracker.removeFromAllUsers(): same STYLE-level NP on
+         Path.getFileName(); the paths we walk are always under
+         .gitsync-pending/<username>/ so they cannot reach the filesystem root. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.PendingChangeTracker"/>
+        <Method name="removeFromAllUsers"/>
+        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
+    </Match>
+
+    <!-- SwingWorker.done() catches Exception because SwingWorker.get() declares
+         throws Exception. Narrowing would require wrapping every work unit. -->
+    <Match>
+        <Class name="~com\.mirth\.connect\.plugins\.gitsync\.GitSyncSettingsPanel\$\d+"/>
+        <Bug pattern="REC_CATCH_EXCEPTION"/>
+    </Match>
+
+    <!-- deserialiseAndCollectLibrary deliberately catches Exception: one corrupt
+         library must not abort the import of the others. The failure is recorded
+         on the PromotionResult and surfaced to the caller. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.PromotionService"/>
+        <Method name="deserialiseAndCollectLibrary"/>
+        <Bug pattern="REC_CATCH_EXCEPTION"/>
+    </Match>
+
+    <!-- registerXStreamAliases deliberately swallows registration failures (see
+         the inline comment): the panel still works, falling back to
+         fully-qualified XML element names. -->
+    <Match>
+        <Class name="com.mirth.connect.plugins.gitsync.GitSyncClient"/>
+        <Method name="registerXStreamAliases"/>
+        <Bug pattern="DE_MIGHT_IGNORE"/>
+    </Match>
+
+</FindBugsFilter>

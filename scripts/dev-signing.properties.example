@@ -1,0 +1,39 @@
+# Local development signing and deploy configuration.
+#
+# Copy this file to scripts/dev-signing.properties and edit. The real file is
+# gitignored so your keystore password and container names never land in Git.
+#
+# scripts/dev-setup.sh reads this on first run; scripts/dev-deploy.sh reads it
+# on every rebuild.
+
+# -- Keystore used by jarsigner. dev-setup.sh will generate it on first run
+#    if missing. --
+keystore.path=scripts/dev-keystore.jks
+keystore.alias=gitsync-dev
+keystore.password=gitsync-dev
+# Distinguished name for the generated self-signed certificate. Not shared with
+# anyone outside your own machine — the cert only needs to be trusted by your
+# own OpenWebStart install.
+keystore.dname=CN=gitsync-dev, OU=Local Development, O=Local Development, C=GB
+# Validity in days. Default 10 years so you don't rotate during normal use.
+keystore.validity=3650
+
+# -- Target OIE containers. Space-separated list. dev-deploy.sh pushes the
+#    built plugin into each of these. Override on the command line with
+#    `./scripts/dev-deploy.sh container1 container2`. --
+containers=engine-oie-1
+
+# -- Admin console / REST API URLs for the same containers, in the same order
+#    as `containers`. dev-setup.sh imports their TLS certificates into
+#    OpenWebStart's trust store so the admin console can connect. --
+urls=https://localhost:8443
+
+# -- Whether dev-deploy.sh should `docker restart` the container after the
+#    push. Set to false to skip the restart when you're iterating fast on
+#    client-only changes (the settings panel re-loads on javaws relaunch
+#    without needing the server to cycle). --
+restart.after.deploy=true
+
+# -- Whether dev-deploy.sh should nuke OpenWebStart's cache and kill any
+#    running javaws so the next launch re-downloads the new JARs. --
+clear.openwebstart.cache=true

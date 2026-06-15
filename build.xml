@@ -1,0 +1,553 @@
+<project name="oie-git-sync" basedir="." default="build">
+
+    <property file="build.properties" />
+
+    <!-- Static analysis tool versions / paths -->
+    <property name="checkstyle.version" value="10.21.1" />
+    <property name="checkstyle.jar" value="${lib.dir}/checkstyle-${checkstyle.version}-all.jar" />
+    <property name="spotbugs.version" value="4.8.6" />
+    <property name="spotbugs.home" value="${lib.dir}/spotbugs-${spotbugs.version}" />
+    <property name="reports.dir" value="${build.dir}/reports" />
+
+    <!-- Test tooling versions / paths -->
+    <property name="test.dir" value="test" />
+    <property name="test.classes.dir" value="${build.dir}/test-classes" />
+    <property name="test.lib.dir" value="${lib.dir}/test" />
+    <property name="junit.version" value="1.10.2" />
+    <property name="junit.jar" value="${test.lib.dir}/junit-platform-console-standalone-${junit.version}.jar" />
+    <property name="mockito.version" value="5.11.0" />
+    <property name="byte-buddy.version" value="1.14.13" />
+    <property name="objenesis.version" value="3.3" />
+    <property name="jacoco.version" value="0.8.12" />
+    <property name="jacoco.home" value="${test.lib.dir}/jacoco-${jacoco.version}" />
+    <property name="gjf.version" value="1.22.0" />
+    <property name="gjf.jar" value="${test.lib.dir}/google-java-format-${gjf.version}-all-deps.jar" />
+    <property name="errorprone.version" value="2.27.0" />
+    <property name="errorprone.jar" value="${test.lib.dir}/error_prone_core-${errorprone.version}-with-dependencies.jar" />
+    <property name="dataflow.version" value="3.41.0-eisop2" />
+    <property name="javac.jar" value="${test.lib.dir}/javac-9+181-r4173-1.jar" />
+    <!-- Coverage gate is off by default so intermediate commits on a
+         work-in-progress branch can run `ant coverage` without failing when
+         the line/branch targets haven't been reached yet. CI explicitly
+         flips this to true by calling `ant coverage-enforce` (see
+         .github/workflows/ci.yml), which delegates to `coverage` with the
+         property set. -->
+    <property name="coverage.enforce" value="false" />
+
+    <!-- Engine compile-time classpath -->
+    <path id="engine.classpath">
+        <fileset dir="${engine.dir}/server/lib">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="${engine.dir}/server/lib/donkey" erroronmissingdir="false">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="${engine.dir}/server/setup/server-lib" erroronmissingdir="false">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="${engine.dir}/server/setup/client-lib" erroronmissingdir="false">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="${engine.dir}/donkey/lib">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="${engine.dir}/donkey/setup" erroronmissingdir="false">
+            <include name="**/*.jar" />
+        </fileset>
+        <fileset dir="${engine.dir}/client/lib" erroronmissingdir="false">
+            <include name="**/*.jar" />
+        </fileset>
+    </path>
+
+    <!-- Plugin library classpath (JGit etc.) -->
+    <path id="lib.classpath">
+        <fileset dir="${lib.dir}">
+            <include name="*.jar" />
+        </fileset>
+    </path>
+
+    <path id="compile.classpath">
+        <path refid="engine.classpath" />
+        <path refid="lib.classpath" />
+    </path>
+
+    <target name="clean">
+        <delete dir="${build.dir}" />
+        <delete dir="${dist.dir}" />
+    </target>
+
+    <target name="init">
+        <mkdir dir="${classes.dir}" />
+        <mkdir dir="${dist.dir}" />
+    </target>
+
+    <target name="check-engine">
+        <available file="${engine.dir}/server/lib" type="dir" property="engine.available" />
+        <fail unless="engine.available"
+              message="Engine source not found at ${engine.dir}. Set engine.dir in build.properties." />
+    </target>
+
+    <target name="check-libs">
+        <available file="${lib.dir}/org.eclipse.jgit.jar" property="jgit.available" />
+        <fail unless="jgit.available"
+              message="JGit not found in ${lib.dir}/. Run 'ant fetch-libs' first." />
+    </target>
+
+    <target name="fetch-libs" description="Download JGit and dependencies">
+        <mkdir dir="${lib.dir}" />
+        <get dest="${lib.dir}/org.eclipse.jgit.jar"
+             src="https://repo1.maven.org/maven2/org/eclipse/jgit/org.eclipse.jgit/7.1.0.202411261347-r/org.eclipse.jgit-7.1.0.202411261347-r.jar"
+             skipexisting="true" />
+        <get dest="${lib.dir}/org.eclipse.jgit.ssh.jsch.jar"
+             src="https://repo1.maven.org/maven2/org/eclipse/jgit/org.eclipse.jgit.ssh.jsch/7.1.0.202411261347-r/org.eclipse.jgit.ssh.jsch-7.1.0.202411261347-r.jar"
+             skipexisting="true" />
+        <get dest="${lib.dir}/jsch.jar"
+             src="https://repo1.maven.org/maven2/com/jcraft/jsch/0.1.55/jsch-0.1.55.jar"
+             skipexisting="true" />
+        <get dest="${lib.dir}/slf4j-api.jar"
+             src="https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.jar"
+             skipexisting="true" />
+    </target>
+
+    <target name="fetch-tools" description="Download static analysis tools (Checkstyle, SpotBugs)">
+        <mkdir dir="${lib.dir}" />
+        <get dest="${checkstyle.jar}"
+             src="https://github.com/checkstyle/checkstyle/releases/download/checkstyle-${checkstyle.version}/checkstyle-${checkstyle.version}-all.jar"
+             skipexisting="true" />
+        <!-- SpotBugs ships as a zip with lib/ inside; grab the zip then unzip once. -->
+        <get dest="${lib.dir}/spotbugs-${spotbugs.version}.zip"
+             src="https://github.com/spotbugs/spotbugs/releases/download/${spotbugs.version}/spotbugs-${spotbugs.version}.zip"
+             skipexisting="true" />
+        <condition property="spotbugs.extracted">
+            <available file="${spotbugs.home}/lib/spotbugs.jar" />
+        </condition>
+        <antcall target="-extract-spotbugs" />
+    </target>
+
+    <target name="-extract-spotbugs" unless="spotbugs.extracted">
+        <unzip src="${lib.dir}/spotbugs-${spotbugs.version}.zip" dest="${lib.dir}" />
+    </target>
+
+    <target name="compile" depends="init, check-engine, check-libs">
+        <javac srcdir="${src.dir}"
+               destdir="${classes.dir}"
+               classpathref="compile.classpath"
+               source="17"
+               target="17"
+               release="17"
+               includeantruntime="false"
+               debug="true">
+        </javac>
+        <!-- Copy non-Java resources (plugin.xml) -->
+        <copy todir="${classes.dir}">
+            <fileset dir="${src.dir}">
+                <include name="**/*.xml" />
+                <include name="**/*.properties" />
+            </fileset>
+        </copy>
+    </target>
+
+    <target name="build" depends="compile" description="Build extension ZIP">
+        <mkdir dir="${build.dir}/gitsync" />
+        <mkdir dir="${build.dir}/gitsync/lib" />
+
+        <!-- Copy plugin.xml -->
+        <copy todir="${build.dir}/gitsync">
+            <fileset dir="${src.dir}/com/mirth/connect/plugins/gitsync">
+                <include name="plugin.xml" />
+            </fileset>
+        </copy>
+        <replace dir="${build.dir}/gitsync" token="@pluginversion" value="${plugin.version}" />
+        <replace dir="${build.dir}/gitsync" token="@oieversion" value="${oie.version}" />
+
+        <!-- Create shared JAR (servlet interface + model DTOs + constants/enums
+             referenced by both the server and the client settings panel). -->
+        <jar destfile="${build.dir}/gitsync/gitsync-shared.jar" basedir="${classes.dir}">
+            <include name="com/mirth/connect/plugins/gitsync/GitSyncServletInterface.class" />
+            <include name="com/mirth/connect/plugins/gitsync/GitSyncProperties.class" />
+            <include name="com/mirth/connect/plugins/gitsync/NodeRole.class" />
+            <include name="com/mirth/connect/plugins/gitsync/CredentialType.class" />
+            <include name="com/mirth/connect/plugins/gitsync/model/**" />
+        </jar>
+
+        <!-- Create client JAR (settings panel + client plugin) -->
+        <jar destfile="${build.dir}/gitsync/gitsync-client.jar" basedir="${classes.dir}">
+            <include name="com/mirth/connect/plugins/gitsync/GitSyncClient.class" />
+            <include name="com/mirth/connect/plugins/gitsync/GitSyncSettingsPanel*.class" />
+        </jar>
+
+        <!-- Create server JAR (everything else, excluding client and shared).
+             plugin.xml ships token-replaced at the extension root; exclude the
+             raw resource copy so it isn't duplicated inside the JAR. -->
+        <jar destfile="${build.dir}/gitsync/gitsync-server.jar" basedir="${classes.dir}">
+            <include name="com/mirth/connect/plugins/gitsync/**" />
+            <exclude name="com/mirth/connect/plugins/gitsync/plugin.xml" />
+            <exclude name="com/mirth/connect/plugins/gitsync/GitSyncServletInterface.class" />
+            <exclude name="com/mirth/connect/plugins/gitsync/GitSyncProperties.class" />
+            <exclude name="com/mirth/connect/plugins/gitsync/NodeRole.class" />
+            <exclude name="com/mirth/connect/plugins/gitsync/CredentialType.class" />
+            <exclude name="com/mirth/connect/plugins/gitsync/GitSyncClient.class" />
+            <exclude name="com/mirth/connect/plugins/gitsync/GitSyncSettingsPanel*.class" />
+            <exclude name="com/mirth/connect/plugins/gitsync/model/**" />
+        </jar>
+
+        <!-- Copy runtime dependencies only — explicitly excludes static
+             analysis tool JARs (Checkstyle, SpotBugs) that also live in
+             lib/ after `ant fetch-tools` but should not be deployed. -->
+        <copy todir="${build.dir}/gitsync/lib">
+            <fileset dir="${lib.dir}">
+                <include name="*.jar" />
+                <exclude name="checkstyle-*.jar" />
+                <exclude name="spotbugs-*.jar" />
+            </fileset>
+        </copy>
+
+        <!-- Create distribution ZIP -->
+        <zip destfile="${dist.dir}/gitsync-${plugin.version}.zip"
+             basedir="${build.dir}"
+             includes="gitsync/**/*" />
+
+        <echo>Built: ${dist.dir}/gitsync-${plugin.version}.zip</echo>
+    </target>
+
+    <!-- =====================================================================
+         Static analysis
+         ===================================================================== -->
+
+    <target name="checkstyle" depends="fetch-tools" description="Run Checkstyle against src/">
+        <mkdir dir="${reports.dir}/checkstyle" />
+        <java jar="${checkstyle.jar}" fork="true" failonerror="true">
+            <arg value="-c" />
+            <arg value="${basedir}/config/checkstyle/checkstyle.xml" />
+            <arg value="-f" />
+            <arg value="xml" />
+            <arg value="-o" />
+            <arg value="${reports.dir}/checkstyle/checkstyle-report.xml" />
+            <arg value="${src.dir}" />
+        </java>
+        <echo>Checkstyle report: ${reports.dir}/checkstyle/checkstyle-report.xml</echo>
+    </target>
+
+    <target name="spotbugs" depends="compile, fetch-tools" description="Run SpotBugs against compiled classes">
+        <mkdir dir="${reports.dir}/spotbugs" />
+        <path id="spotbugs.classpath">
+            <fileset dir="${spotbugs.home}/lib">
+                <include name="*.jar" />
+            </fileset>
+        </path>
+        <!-- SpotBugs 4.x reuses the historical FindBugsTask ant class name. -->
+        <taskdef name="spotbugs"
+                 classname="edu.umd.cs.findbugs.anttask.FindBugsTask"
+                 classpathref="spotbugs.classpath" />
+        <spotbugs home="${spotbugs.home}"
+                  output="xml:withMessages"
+                  outputFile="${reports.dir}/spotbugs/spotbugs-report.xml"
+                  effort="default"
+                  reportLevel="medium"
+                  excludeFilter="${basedir}/config/spotbugs/exclude.xml"
+                  failOnError="false">
+            <auxClasspath refid="compile.classpath" />
+            <sourcePath path="${src.dir}" />
+            <class location="${classes.dir}" />
+        </spotbugs>
+        <echo>SpotBugs report: ${reports.dir}/spotbugs/spotbugs-report.xml</echo>
+    </target>
+
+    <!-- =====================================================================
+         Test infrastructure
+         ===================================================================== -->
+
+    <target name="fetch-test-libs" description="Download JUnit, Mockito, JaCoCo, google-java-format">
+        <mkdir dir="${test.lib.dir}" />
+        <!-- JUnit 5 all-in-one CLI runner. Fat jar bundles jupiter-api, jupiter-engine,
+             jupiter-params, platform-console, apiguardian, opentest4j. Easiest to run
+             from Ant with a <java fork="true" jar="..."> call. -->
+        <get dest="${junit.jar}"
+             src="https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/${junit.version}/junit-platform-console-standalone-${junit.version}.jar"
+             skipexisting="true" />
+
+        <!-- Mockito core + its three runtime deps. -->
+        <get dest="${test.lib.dir}/mockito-core-${mockito.version}.jar"
+             src="https://repo1.maven.org/maven2/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar"
+             skipexisting="true" />
+        <get dest="${test.lib.dir}/byte-buddy-${byte-buddy.version}.jar"
+             src="https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy/${byte-buddy.version}/byte-buddy-${byte-buddy.version}.jar"
+             skipexisting="true" />
+        <get dest="${test.lib.dir}/byte-buddy-agent-${byte-buddy.version}.jar"
+             src="https://repo1.maven.org/maven2/net/bytebuddy/byte-buddy-agent/${byte-buddy.version}/byte-buddy-agent-${byte-buddy.version}.jar"
+             skipexisting="true" />
+        <get dest="${test.lib.dir}/objenesis-${objenesis.version}.jar"
+             src="https://repo1.maven.org/maven2/org/objenesis/objenesis/${objenesis.version}/objenesis-${objenesis.version}.jar"
+             skipexisting="true" />
+
+        <!-- JaCoCo — agent + ant task. Ships as a zip with lib/ inside. -->
+        <get dest="${test.lib.dir}/jacoco-${jacoco.version}.zip"
+             src="https://repo1.maven.org/maven2/org/jacoco/jacoco/${jacoco.version}/jacoco-${jacoco.version}.zip"
+             skipexisting="true" />
+        <condition property="jacoco.extracted">
+            <available file="${jacoco.home}/lib/jacocoant.jar" />
+        </condition>
+        <antcall target="-extract-jacoco" />
+
+        <!-- google-java-format — all-in-one jar for format checking. -->
+        <get dest="${gjf.jar}"
+             src="https://github.com/google/google-java-format/releases/download/v${gjf.version}/google-java-format-${gjf.version}-all-deps.jar"
+             skipexisting="true" />
+
+        <!-- ErrorProne — the javac plugin + its dep on the `com.google.errorprone:javac`
+             tools jar that patches javac with the compiler plugin API on JDK 17+. -->
+        <get dest="${errorprone.jar}"
+             src="https://repo1.maven.org/maven2/com/google/errorprone/error_prone_core/${errorprone.version}/error_prone_core-${errorprone.version}-with-dependencies.jar"
+             skipexisting="true" />
+        <get dest="${javac.jar}"
+             src="https://repo1.maven.org/maven2/com/google/errorprone/javac/9+181-r4173-1/javac-9+181-r4173-1.jar"
+             skipexisting="true" />
+    </target>
+
+    <target name="-extract-jacoco" unless="jacoco.extracted">
+        <mkdir dir="${jacoco.home}" />
+        <unzip src="${test.lib.dir}/jacoco-${jacoco.version}.zip" dest="${jacoco.home}" />
+    </target>
+
+    <target name="check-test-libs">
+        <available file="${junit.jar}" property="junit.available" />
+        <fail unless="junit.available"
+              message="Test libs not found in ${test.lib.dir}/. Run 'ant fetch-test-libs' first." />
+    </target>
+
+    <!-- Test classpath: compiled main classes + engine classpath + plugin libs +
+         test libs. -->
+    <path id="test.classpath">
+        <pathelement location="${classes.dir}" />
+        <path refid="compile.classpath" />
+        <fileset dir="${test.lib.dir}" erroronmissingdir="false">
+            <include name="*.jar" />
+        </fileset>
+    </path>
+
+    <path id="test.runtime.classpath">
+        <pathelement location="${classes.dir}" />
+        <pathelement location="${test.classes.dir}" />
+        <path refid="compile.classpath" />
+        <fileset dir="${test.lib.dir}" erroronmissingdir="false">
+            <include name="*.jar" />
+        </fileset>
+    </path>
+
+    <target name="compile-tests" depends="compile, check-test-libs"
+            description="Compile the JUnit 5 test sources under test/">
+        <mkdir dir="${test.classes.dir}" />
+        <!-- Empty home dir for the test JVM — used to isolate JGit from the
+             developer's global gitconfig, see the env block in `test`. -->
+        <mkdir dir="${build.dir}/test-home" />
+        <available file="${test.dir}" type="dir" property="test.dir.exists" />
+        <fail unless="test.dir.exists" message="No ${test.dir}/ directory found." />
+        <javac srcdir="${test.dir}"
+               destdir="${test.classes.dir}"
+               source="17" target="17" release="17"
+               includeantruntime="false"
+               debug="true">
+            <classpath refid="test.classpath" />
+        </javac>
+        <!-- Copy test resources (if any) into the test classpath root.
+             mockito-extensions/** is an extension-less SPI file that needs
+             to be on the runtime classpath for Mockito to pick up the
+             inline mock maker, so the pattern copies it explicitly. -->
+        <copy todir="${test.classes.dir}">
+            <fileset dir="${test.dir}" erroronmissingdir="false">
+                <include name="**/*.xml" />
+                <include name="**/*.json" />
+                <include name="**/*.properties" />
+                <include name="**/*.txt" />
+                <include name="mockito-extensions/**" />
+            </fileset>
+        </copy>
+    </target>
+
+    <target name="test" depends="compile-tests"
+            description="Run the JUnit 5 test suite">
+        <mkdir dir="${reports.dir}/tests" />
+        <java jar="${junit.jar}" fork="true" failonerror="true">
+            <!-- Force Mockito to use the inline mock maker so tests can stub
+                 final methods and mock static calls. The resource file
+                 mockito-extensions/org.mockito.plugins.MockMaker is also on
+                 the test classpath as a fallback, but the system property
+                 wins. -->
+            <sysproperty key="mockito.mock.maker" value="mock-maker-inline" />
+            <!-- byte-buddy needs its agent attached to the JVM for inline
+                 mocking; -XX:+EnableDynamicAgentLoading silences the JDK 21+
+                 warning and keeps the behaviour working under JDK 17+. -->
+            <jvmarg value="-XX:+EnableDynamicAgentLoading" />
+            <!-- Isolate JGit from the developer's global git config. A host
+                 with commit.gpgSign=true (especially with gpg.format=ssh)
+                 will make JGit's commit() fail with
+                 UnsupportedSigningFormatException during GitRepoManager
+                 tests. JGit reads ~/.gitconfig and ~/.config/git/config via
+                 System.getProperty("user.home"), so redirecting user.home at
+                 an empty directory keeps the test JVM hermetic regardless of
+                 who is running it. HOME and XDG_CONFIG_HOME are set too as
+                 belt-and-braces for JGit versions that read the env. -->
+            <sysproperty key="user.home" value="${build.dir}/test-home" />
+            <env key="HOME" value="${build.dir}/test-home" />
+            <env key="XDG_CONFIG_HOME" value="${build.dir}/test-home/.config" />
+            <arg value="execute" />
+            <arg value="--class-path" />
+            <arg pathref="test.runtime.classpath" />
+            <arg value="--scan-class-path" />
+            <arg value="${test.classes.dir}" />
+            <arg value="--reports-dir=${reports.dir}/tests" />
+            <arg value="--details=tree" />
+            <arg value="--disable-banner" />
+        </java>
+    </target>
+
+    <target name="coverage" depends="compile-tests"
+            description="Run the JUnit 5 test suite under the JaCoCo agent and generate reports">
+        <taskdef uri="antlib:org.jacoco.ant" resource="org/jacoco/ant/antlib.xml">
+            <classpath>
+                <fileset dir="${jacoco.home}/lib">
+                    <include name="*.jar" />
+                </fileset>
+            </classpath>
+        </taskdef>
+        <mkdir dir="${reports.dir}/coverage" />
+        <delete file="${reports.dir}/coverage/jacoco.exec" quiet="true" />
+
+        <jacoco:coverage destfile="${reports.dir}/coverage/jacoco.exec"
+                         xmlns:jacoco="antlib:org.jacoco.ant">
+            <java jar="${junit.jar}" fork="true" failonerror="true">
+                <sysproperty key="mockito.mock.maker" value="mock-maker-inline" />
+                <sysproperty key="user.home" value="${build.dir}/test-home" />
+                <jvmarg value="-XX:+EnableDynamicAgentLoading" />
+                <env key="HOME" value="${build.dir}/test-home" />
+                <env key="XDG_CONFIG_HOME" value="${build.dir}/test-home/.config" />
+                <arg value="execute" />
+                <arg value="--class-path" />
+                <arg pathref="test.runtime.classpath" />
+                <arg value="--scan-class-path" />
+                <arg value="${test.classes.dir}" />
+                <arg value="--reports-dir=${reports.dir}/tests" />
+                <arg value="--details=tree" />
+                <arg value="--disable-banner" />
+            </java>
+        </jacoco:coverage>
+
+        <jacoco:report xmlns:jacoco="antlib:org.jacoco.ant">
+            <executiondata>
+                <file file="${reports.dir}/coverage/jacoco.exec" />
+            </executiondata>
+            <structure name="oie-git-sync">
+                <classfiles>
+                    <!-- Exclude classes that cannot be meaningfully unit
+                         tested from the coverage denominator. Each
+                         exclusion is documented: -->
+                    <fileset dir="${classes.dir}">
+                        <include name="com/mirth/connect/plugins/gitsync/**/*.class" />
+                        <!-- GitSyncSettingsPanel is a 1000-line Swing panel.
+                             Testing it meaningfully requires an X server + a
+                             headless Swing harness + mocks for every OIE
+                             admin console dependency. The live container
+                             test against OpenWebStart is the real verifier. -->
+                        <exclude name="com/mirth/connect/plugins/gitsync/GitSyncSettingsPanel*.class" />
+                        <!-- GitSyncClient is 37 lines of OIE plugin
+                             bootstrap glue: constructor, 4 empty
+                             lifecycle hooks, and a getter that returns
+                             the settings panel. Nothing to assert. -->
+                        <exclude name="com/mirth/connect/plugins/gitsync/GitSyncClient.class" />
+                        <!-- GitSyncServlet is a thin delegator to
+                             GitSyncPlugin.getInstance(). Annotation
+                             contract is checked by
+                             GitSyncServletInterfaceContractTest; runtime
+                             delegation is verified by the container-side
+                             REST API tests on the refactor branch. -->
+                        <exclude name="com/mirth/connect/plugins/gitsync/GitSyncServlet.class" />
+                        <!-- SyncEventLogger depends on OIE's running
+                             EventController. Spinning one up in a unit
+                             test requires the entire OIE lifecycle. -->
+                        <exclude name="com/mirth/connect/plugins/gitsync/SyncEventLogger.class" />
+                        <!-- GitSyncPlugin is now a thin facade (~1100
+                             lines) after the promote() extraction into
+                             PromotionService. Still excluded because the
+                             remaining code requires the full OIE lifecycle
+                             (ControllerFactory, UserController, etc.) to
+                             exercise beyond the guard/lifecycle tests in
+                             GitSyncPluginTest. -->
+                        <exclude name="com/mirth/connect/plugins/gitsync/GitSyncPlugin.class" />
+                        <!-- PromotionService import methods call OIE
+                             controllers (ChannelController, CodeTemplateController,
+                             etc.) which cannot run outside the OIE lifecycle.
+                             The pure helpers (detectChanges, extractIds,
+                             parseConfigMapTemplateKeys) are covered by
+                             PromotionServiceTest. -->
+                        <exclude name="com/mirth/connect/plugins/gitsync/PromotionService.class" />
+                        <exclude name="com/mirth/connect/plugins/gitsync/PromotionService$ChangedArtifacts.class" />
+                    </fileset>
+                </classfiles>
+                <sourcefiles encoding="UTF-8">
+                    <fileset dir="${src.dir}" />
+                </sourcefiles>
+            </structure>
+            <html destdir="${reports.dir}/coverage/html" />
+            <xml destfile="${reports.dir}/coverage/jacoco.xml" />
+            <csv destfile="${reports.dir}/coverage/jacoco.csv" />
+            <!-- Coverage gate: line >= 80%, branch >= 70% across the
+                 subset of classes that the unit tests actually target
+                 (the excludes above peel off the Swing UI, OIE-lifecycle
+                 bootstrap classes, and the GitSyncPlugin facade).
+                 JaCoCo 0.8.x does not ship a standalone check task
+                 in the Ant namespace; check rules are nested inside
+                 <report> instead, and the report task fails the build if
+                 any rule is violated. -->
+            <check failonviolation="${coverage.enforce}">
+                <rule element="BUNDLE">
+                    <limit counter="LINE" value="COVEREDRATIO" minimum="0.80" />
+                    <limit counter="BRANCH" value="COVEREDRATIO" minimum="0.70" />
+                </rule>
+            </check>
+        </jacoco:report>
+        <echo>Coverage report: ${reports.dir}/coverage/html/index.html</echo>
+    </target>
+
+    <target name="coverage-enforce" description="Run coverage with the 80/70 gate enforced">
+        <property name="coverage.enforce" value="true" />
+        <antcall target="coverage" />
+    </target>
+
+    <target name="format-check" depends="fetch-test-libs"
+            description="Run google-java-format in check-only mode">
+        <fileset id="java.sources" dir="${src.dir}">
+            <include name="**/*.java" />
+        </fileset>
+        <pathconvert property="java.sources.list" refid="java.sources" pathsep=" " />
+        <java jar="${gjf.jar}" fork="true" failonerror="true">
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED" />
+            <arg value="--set-exit-if-changed" />
+            <arg value="--dry-run" />
+            <arg line="${java.sources.list}" />
+        </java>
+    </target>
+
+    <target name="format" depends="fetch-test-libs"
+            description="Reformat all Java sources in place with google-java-format">
+        <fileset id="java.sources.f" dir="${src.dir}">
+            <include name="**/*.java" />
+        </fileset>
+        <pathconvert property="java.sources.f.list" refid="java.sources.f" pathsep=" " />
+        <java jar="${gjf.jar}" fork="true" failonerror="true">
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED" />
+            <jvmarg value="--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED" />
+            <arg value="--replace" />
+            <arg line="${java.sources.f.list}" />
+        </java>
+    </target>
+
+</project>
